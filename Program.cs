@@ -20,6 +20,7 @@ namespace Crypto_Network_Simulation {
 
 
             c1.SendMessage("FirstMessage", c3);
+            c1.SendFile(@"D:\KPI\Security\Crypto-Network-Simulation\lab1.docx", c3);
 
             Console.ReadLine();
         }

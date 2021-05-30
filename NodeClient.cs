@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Services;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -8,6 +9,7 @@ namespace Crypto_Network_Simulation {
     public class NodeClient : ISendMessageBehavior {
         protected string publicKey;
         protected string privateKey;
+        private readonly string localFolder;
 
         public string Name { get; set; }
         public NodeClient() {
@@ -17,9 +19,13 @@ namespace Crypto_Network_Simulation {
         private void GenerateKeys() {
             //TODO rewrite it (use your own algoritm)
             RSACryptoServiceProvider rsa = new RSACryptoServiceProvider();
+            MyRSACryptoServiceProvider myRSA = new MyRSACryptoServiceProvider();
             // Get the public keyy   
-            string publicKey = rsa.ToXmlString(false); // false to get the public key   
-            string privateKey = rsa.ToXmlString(true);
+            string publicKey = myRSA.GenerateKey(false); // false to get the public key   
+            string privateKey = myRSA.GenerateKey(true);
+            //// Get the public keyy   
+            string publicKey2 = rsa.ToXmlString(false); // false to get the public key   
+            string privateKey2 = rsa.ToXmlString(true);
 
             this.publicKey = publicKey;
             this.privateKey = privateKey;
@@ -28,6 +34,7 @@ namespace Crypto_Network_Simulation {
         public List<NodeClient> ConnectedClients { get; set; } = new List<NodeClient>();
 
         private Dictionary<NodeClient, string> ClientPublicKey { get; set; } = new Dictionary<NodeClient, string>();
+        private Dictionary<NodeClient, string> ClientSymetricKey { get; set; } = new Dictionary<NodeClient, string>();
 
         public void SendMessage(string message, NodeClient recepient) {
             if (!ClientPublicKey.ContainsKey(recepient)) {
@@ -53,21 +60,18 @@ namespace Crypto_Network_Simulation {
 
             SendPackage(package, this);
         }
-        static byte[] encryptedData1;
-        static byte[] encryptedData2;
 
         private string AsyncEncrypt(string message, string publicKey) {
             byte[] dataToEncrypt = Convert.FromBase64String(message);
 
             // Create a byte array to store the encrypted data in it   
             byte[] encryptedData;
-            using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider()) {
+            using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(4096)) {
                 // Set the rsa pulic key   
                 rsa.FromXmlString(publicKey);
 
                 // Encrypt the data and store it in the encyptedData Array   
                 encryptedData = rsa.Encrypt(dataToEncrypt, false);
-                encryptedData1 = encryptedData;
             }
 
             return Convert.ToBase64String(encryptedData);
@@ -76,12 +80,11 @@ namespace Crypto_Network_Simulation {
 
         private string AsyncDecrypt(string message) {
             byte[] dataToDecrypt = Convert.FromBase64String(message);
-            encryptedData2 = dataToDecrypt;
 
-            var equalArrays = Enumerable.SequenceEqual(encryptedData1, encryptedData2);
             // Create an array to store the decrypted data in it   
             byte[] decryptedData;
-            using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider()) {
+            using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(4096)) {
+
                 // Set the private key of the algorithm   
                 rsa.FromXmlString(privateKey);
                 decryptedData = rsa.Decrypt(dataToDecrypt, false);
@@ -112,15 +115,57 @@ namespace Crypto_Network_Simulation {
                 case PackageType.RecieveMessage:
                     HandleRecieveMessage(package);
                     break;
+                case PackageType.GetSymetricKey:
+                    HandleGetSymetricKey(package);
+                    break;
+                case PackageType.ReceiveSymetricKey:
+                    HandleRecieveSymetricKey(package);
+                    break;
+                case PackageType.RecieveFile:
+                    HandleRecieveFile(package);
+                    break;
             }
+        }
 
-            //1 SendMesage from client 1 to client 3 with asymmetric algorithm. Except when they share asymetric keys. (So client 1 говорит елиенту 3 я хочу тебе отправить сообщение, клиент 3 передает ключ клиенту 1, клиент 1 передает шифрованое сообщение)
-            //2 
-            //3
+        private void HandleRecieveFile(Package package) {
+            string symetricKey = ClientSymetricKey.GetValueOrDefault(package.Sender);
+            if(symetricKey == null) {
+                Package symetricMessage = new Package() {
+                    Type = PackageType.GetSymetricKey,
+                    Sender = this,
+                    Recipient = package.Sender
+                };
+                SendPackage(symetricMessage, this);
+                symetricKey = ClientSymetricKey.GetValueOrDefault(package.Sender);
+            }
+            SymetricFileCypher.DecryptFile(package.File, this.localFolder, symetricKey);
+            DisplayMessage("File recieved", "Recieved message");
+        }
+
+        private void HandleRecieveSymetricKey(Package package) {
+            string symetricKey = AsyncDecrypt(package.Message);
+            ClientSymetricKey.Add(package.Sender, symetricKey);
+        }
+
+        private void HandleGetSymetricKey(Package package) {
+            string symetricKey;
+            if (!ClientSymetricKey.TryGetValue(package.Sender, out symetricKey)) {
+                symetricKey = SymetricFileCypher.CreateSymetricKey();
+                ClientSymetricKey.Add(package.Sender, symetricKey);
+            }
+            string message = AsyncDecrypt(symetricKey);
+            Package packageToGetKey = new Package() {
+                Message = message,
+                Sender = this,
+                Recipient = package.Sender,
+                Type = PackageType.ReceiveSymetricKey
+            };
+            SendPackage(packageToGetKey, this);
         }
 
         private void HandleReceivePublicKey(Package package) {
-            ClientPublicKey.Add(package.Sender, package.Message);
+            string message = AsyncDecrypt(package.Message);
+            ClientPublicKey.Add(package.Sender, message);
         }
 
         private void HandleGetPublicKey(Package package) {
