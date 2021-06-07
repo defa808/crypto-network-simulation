@@ -31,6 +31,10 @@ namespace Crypto_Network_Simulation {
             this.privateKey = privateKey;
         }
 
+        internal void SendFile(string filePath, NodeClient c3) {
+            
+        }
+
         public List<NodeClient> ConnectedClients { get; set; } = new List<NodeClient>();
 
         private Dictionary<NodeClient, string> ClientPublicKey { get; set; } = new Dictionary<NodeClient, string>();
@@ -93,7 +97,7 @@ namespace Crypto_Network_Simulation {
         }
 
         public void SendPackage(Package package, NodeClient exceptNodeClient) {
-            DisplayPachage(package);
+            DisplayPackage(package);
             if (package.Recipient == this) {
                 HandlePackage(package);
                 return;
@@ -190,7 +194,7 @@ namespace Crypto_Network_Simulation {
             Console.WriteLine();
         }
 
-        private void DisplayPachage(Package package) {
+        private void DisplayPackage(Package package) {
             Console.WriteLine(Name + " handling package");
             Console.WriteLine("Type: " + package.Type);
             if (string.IsNullOrEmpty(package.Message))
