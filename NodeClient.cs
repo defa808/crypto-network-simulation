@@ -1,6 +1,7 @@
 ﻿using Services;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,20 +20,41 @@ namespace Crypto_Network_Simulation {
         private void GenerateKeys() {
             //TODO rewrite it (use your own algoritm)
             RSACryptoServiceProvider rsa = new RSACryptoServiceProvider();
-            MyRSACryptoServiceProvider myRSA = new MyRSACryptoServiceProvider();
+            //MyRSACryptoServiceProvider myRSA = new MyRSACryptoServiceProvider();
             // Get the public keyy   
-            string publicKey = myRSA.GenerateKey(false); // false to get the public key   
-            string privateKey = myRSA.GenerateKey(true);
+            //string publicKey = myRSA.GenerateKey(false); // false to get the public key   
+            //string privateKey = myRSA.GenerateKey(true);
             //// Get the public keyy   
-            string publicKey2 = rsa.ToXmlString(false); // false to get the public key   
-            string privateKey2 = rsa.ToXmlString(true);
+            string publicKey = rsa.ToXmlString(false); // false to get the public key   
+            string privateKey = rsa.ToXmlString(true);
 
             this.publicKey = publicKey;
             this.privateKey = privateKey;
         }
 
-        internal void SendFile(string filePath, NodeClient c3) {
-            
+        public void SendFile(string filePath, NodeClient recepient) {
+            if (!ClientSymetricKey.ContainsKey(recepient)) {
+                DisplayMessage(null, "Get symetric key from " + recepient.Name);
+
+                Package packageToGetKey = new Package() {
+                    Sender = this,
+                    Recipient = recepient,
+                    Type = PackageType.GetSymetricKey
+                };
+                SendPackage(packageToGetKey, this);
+            }
+
+            string symetricKey = ClientSymetricKey[recepient];
+            byte[] file = File.ReadAllBytes(filePath);
+            //DisplayMessage(message, "Sending message");
+            Package package = new Package() {
+                File = SymetricFileCypher.EncryptFile(symetricKey, file),
+                Sender = this,
+                Recipient = recepient,
+                Type = PackageType.ReceiveFile
+            };
+
+            SendPackage(package, this);
         }
 
         public List<NodeClient> ConnectedClients { get; set; } = new List<NodeClient>();
@@ -41,6 +63,20 @@ namespace Crypto_Network_Simulation {
         private Dictionary<NodeClient, string> ClientSymetricKey { get; set; } = new Dictionary<NodeClient, string>();
 
         public void SendMessage(string message, NodeClient recepient) {
+            string publicKey = GetPublicKey(recepient);
+
+            DisplayMessage(message, "Sending message");
+            Package package = new Package() {
+                Message = AsyncEncrypt(message, publicKey),
+                Sender = this,
+                Recipient = recepient,
+                Type = PackageType.ReceiveMessage
+            };
+
+            SendPackage(package, this);
+        }
+
+        private string GetPublicKey(NodeClient recepient) {
             if (!ClientPublicKey.ContainsKey(recepient)) {
                 DisplayMessage(null, "Get public key from " + recepient.Name);
 
@@ -53,16 +89,7 @@ namespace Crypto_Network_Simulation {
             }
 
             string publicKey = ClientPublicKey[recepient];
-
-            DisplayMessage(message, "Sending message");
-            Package package = new Package() {
-                Message = AsyncEncrypt(message, publicKey),
-                Sender = this,
-                Recipient = recepient,
-                Type = PackageType.RecieveMessage
-            };
-
-            SendPackage(package, this);
+            return publicKey;
         }
 
         private string AsyncEncrypt(string message, string publicKey) {
@@ -103,6 +130,10 @@ namespace Crypto_Network_Simulation {
                 return;
             }
 
+            //trying to hack file for client #2
+            if (package.Type == PackageType.ReceiveFile)
+                SaveToFolder(package.File);
+
             foreach (var nextClient in ConnectedClients.Where(x => x != exceptNodeClient)) {
                 nextClient.SendPackage(package, this);
             }
@@ -116,7 +147,7 @@ namespace Crypto_Network_Simulation {
                 case PackageType.ReceivePublicKey:
                     HandleReceivePublicKey(package);
                     break;
-                case PackageType.RecieveMessage:
+                case PackageType.ReceiveMessage:
                     HandleRecieveMessage(package);
                     break;
                 case PackageType.GetSymetricKey:
@@ -125,7 +156,7 @@ namespace Crypto_Network_Simulation {
                 case PackageType.ReceiveSymetricKey:
                     HandleRecieveSymetricKey(package);
                     break;
-                case PackageType.RecieveFile:
+                case PackageType.ReceiveFile:
                     HandleRecieveFile(package);
                     break;
             }
@@ -142,8 +173,16 @@ namespace Crypto_Network_Simulation {
                 SendPackage(symetricMessage, this);
                 symetricKey = ClientSymetricKey.GetValueOrDefault(package.Sender);
             }
-            SymetricFileCypher.DecryptFile(package.File, this.localFolder, symetricKey);
+            byte[] file = SymetricFileCypher.DecryptFile(symetricKey, package.File);
+            
             DisplayMessage("File recieved", "Recieved message");
+            SaveToFolder(file);
+        }
+
+        private void SaveToFolder(byte[] file) {
+            if (!Directory.Exists(this.Name))
+                Directory.CreateDirectory(this.Name);
+            File.WriteAllBytes(this.Name+"/doc1.docx", file);
         }
 
         private void HandleRecieveSymetricKey(Package package) {
@@ -157,7 +196,8 @@ namespace Crypto_Network_Simulation {
                 symetricKey = SymetricFileCypher.CreateSymetricKey();
                 ClientSymetricKey.Add(package.Sender, symetricKey);
             }
-            string message = AsyncDecrypt(symetricKey);
+            string publicKey = GetPublicKey(package.Sender);
+            string message = AsyncEncrypt(symetricKey, publicKey);
             Package packageToGetKey = new Package() {
                 Message = message,
                 Sender = this,
@@ -168,8 +208,7 @@ namespace Crypto_Network_Simulation {
         }
 
         private void HandleReceivePublicKey(Package package) {
-            string message = AsyncDecrypt(package.Message);
-            ClientPublicKey.Add(package.Sender, message);
+            ClientPublicKey.Add(package.Sender, package.Message);
         }
 
         private void HandleGetPublicKey(Package package) {

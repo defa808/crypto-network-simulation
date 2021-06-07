@@ -1,8 +1,8 @@
 ﻿public enum PackageType {
     GetPublicKey,
     ReceivePublicKey,
-    RecieveMessage,
+    ReceiveMessage,
     GetSymetricKey,
     ReceiveSymetricKey,
-    RecieveFile
+    ReceiveFile
 }
